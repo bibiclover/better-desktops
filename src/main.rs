@@ -1,5 +1,5 @@
 use global_hotkey::{
-    GlobalHotKeyEvent, GlobalHotKeyManager,
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey, Modifiers},
 };
 
@@ -14,16 +14,36 @@ use winvd::{create_desktop, get_desktop_count, switch_desktop};
 
 fn main() {
     // desktop (winvd) setup ---
-    create_desktops(10);
 
     // ---
 
     // hotkey (global_hotkey) setup ---
     let manager = GlobalHotKeyManager::new().expect("Failed to intialise GlobalHotKeyManager.");
 
-    let hotkey = HotKey::new(Some(Modifiers::ALT), Code::Digit0);
+    let desktops: [Desktop; 10] = std::array::from_fn(|index| {
+        let code = match index {
+            0 => Code::Digit1,
+            1 => Code::Digit2,
+            2 => Code::Digit3,
+            3 => Code::Digit4,
+            4 => Code::Digit5,
+            5 => Code::Digit6,
+            6 => Code::Digit7,
+            7 => Code::Digit8,
+            8 => Code::Digit9,
+            9 => Code::Digit0,
+            _ => unreachable!(),
+        };
 
-    manager.register(hotkey).unwrap();
+        Desktop {
+            num: u32::try_from(index).unwrap(),
+            hotkey: HotKey::new(Some(Modifiers::ALT), code),
+        }
+    });
+
+    for desktop in &desktops {
+        manager.register(desktop.hotkey).unwrap();
+    }
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
@@ -34,24 +54,11 @@ fn main() {
 
     let mut app = App {
         hotkeys_manager: manager,
-        hotkey,
+        desktops,
     };
 
     event_loop.run_app(&mut app).unwrap()
     // ---
-}
-
-/// Creates desktops until a certain number of desktops exists.
-/// i.e. if to_create is 10, and there currently is 8 desktops, 2 more will be created.
-/// if to_create is 10, and there are currently 12 desktops, nothing will happen.
-fn create_desktops(to_create: u32) {
-    let desktop_count = get_desktop_count().expect("Failed to get desktop count.");
-
-    if desktop_count < to_create {
-        for _ in 1..(desktop_count - to_create) {
-            create_desktop().expect("Failed to create required desktops.");
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -61,7 +68,7 @@ enum AppEvent {
 
 struct App {
     hotkeys_manager: GlobalHotKeyManager,
-    hotkey: HotKey,
+    desktops: [Desktop; 10],
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -78,20 +85,40 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => {
-                println!("{event:?}");
+                // println!("{event:?}");
+
+                // check for 1-10 'direct' shorcut
+                for desktop in &self.desktops {
+                    if event.id == desktop.hotkey.id && event.state == HotKeyState::Pressed {
+                        desktop.switch_to();
+                    }
+                }
             }
         }
     }
 }
 
 struct Desktop {
-    num: i32,
+    num: u32,
     hotkey: HotKey,
 }
 
 impl Desktop {
-    fn switch_to(self) {
-        switch_desktop(self.num)
-            .unwrap_or_else(|err| panic!("Failed to switch to destkop {}: {:?}", self.num, err));
+    fn switch_to(&self) {
+        self.create_desktops();
+        switch_desktop(self.num).unwrap_or_else(|err| {
+            panic!("Failed to switch to destkop {}: {:?}", self.num + 1, err)
+        });
+    }
+
+    /// Creates desktops until the required number of desktops exists.
+    fn create_desktops(&self) {
+        let desktop_count = get_desktop_count().expect("Failed to get desktop count.");
+
+        if desktop_count < self.num + 1 {
+            for _ in 0..=(self.num - desktop_count) {
+                create_desktop().expect("Failed to create required desktops.");
+            }
+        }
     }
 }
