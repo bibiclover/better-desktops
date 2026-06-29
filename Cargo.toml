@@ -1,5 +1,6 @@
 [package]
 name = "better-desktops"
+authors = ["clover <clover@3leaves.dev>"]
 version = "0.1.0"
 edition = "2024"
 

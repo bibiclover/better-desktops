@@ -37,12 +37,14 @@ fn main() {
 
         Desktop {
             num: u32::try_from(index).unwrap(),
-            hotkey: HotKey::new(Some(Modifiers::ALT), code),
+            travel_hotkey: HotKey::new(Some(Modifiers::ALT), code),
+            move_hotkey: HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), code),
         }
     });
 
     for desktop in &desktops {
-        manager.register(desktop.hotkey).unwrap();
+        manager.register(desktop.travel_hotkey).unwrap();
+        manager.register(desktop.move_hotkey).unwrap();
     }
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
@@ -85,12 +87,16 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => {
-                // println!("{event:?}");
+                //println!("{:?}", event);
+                if event.state != HotKeyState::Pressed {
+                    return;
+                }
 
-                // check for 1-10 'direct' shorcut
                 for desktop in &self.desktops {
-                    if event.id == desktop.hotkey.id && event.state == HotKeyState::Pressed {
+                    if event.id == desktop.travel_hotkey.id {
                         desktop.switch_to();
+                    } else if event.id == desktop.move_hotkey.id {
+                        desktop.move_to();
                     }
                 }
             }
@@ -100,7 +106,8 @@ impl ApplicationHandler<AppEvent> for App {
 
 struct Desktop {
     num: u32,
-    hotkey: HotKey,
+    travel_hotkey: HotKey,
+    move_hotkey: HotKey,
 }
 
 impl Desktop {
@@ -109,6 +116,10 @@ impl Desktop {
         switch_desktop(self.num).unwrap_or_else(|err| {
             panic!("Failed to switch to destkop {}: {:?}", self.num + 1, err)
         });
+    }
+
+    fn move_to(&self) {
+        todo!()
     }
 
     /// Creates desktops until the required number of desktops exists.
