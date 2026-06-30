@@ -85,6 +85,7 @@ name = "better-desktops"
 version = "0.1.0"
 dependencies = [
  "global-hotkey",
+ "windows",
  "winit",
  "winvd",
 ]

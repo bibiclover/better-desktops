@@ -8,3 +8,9 @@ edition = "2024"
 global-hotkey = "0.8.0"
 winit = "0.30.13"
 winvd = "0.0.49"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_UI_WindowsAndMessaging",
+]

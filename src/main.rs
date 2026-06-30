@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey, Modifiers},
@@ -10,7 +12,11 @@ use winit::{
     window::WindowId,
 };
 
-use winvd::{create_desktop, get_desktop_count, switch_desktop};
+use winvd::{create_desktop, get_desktop_count, move_window_to_desktop, switch_desktop};
+
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetDesktopWindow, GetForegroundWindow, GetShellWindow,
+};
 
 fn main() {
     // desktop (winvd) setup ---
@@ -47,6 +53,19 @@ fn main() {
         manager.register(desktop.move_hotkey).unwrap();
     }
 
+    manager
+        .register(HotKey::new(
+            Some(Modifiers::CONTROL | Modifiers::ALT),
+            Code::ArrowLeft,
+        ))
+        .unwrap();
+    manager
+        .register(HotKey::new(
+            Some(Modifiers::CONTROL | Modifiers::ALT),
+            Code::ArrowRight,
+        ))
+        .unwrap();
+
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
 
@@ -69,6 +88,7 @@ enum AppEvent {
 }
 
 struct App {
+    #[allow(dead_code)]
     hotkeys_manager: GlobalHotKeyManager,
     desktops: [Desktop; 10],
 }
@@ -119,7 +139,23 @@ impl Desktop {
     }
 
     fn move_to(&self) {
-        todo!()
+        self.create_desktops();
+        let hwnd = unsafe { GetForegroundWindow() };
+
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't move.");
+            return;
+        }
+
+        if let Err(e) = move_window_to_desktop(self.num, &hwnd) {
+            eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
+            return;
+        }
     }
 
     /// Creates desktops until the required number of desktops exists.
