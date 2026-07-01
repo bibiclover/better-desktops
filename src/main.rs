@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
+
 use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey, Modifiers},
@@ -19,15 +21,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 fn main() {
-    // desktop (winvd) setup ---
-
-    // ---
-
-    // hotkey (global_hotkey) setup ---
     let manager = GlobalHotKeyManager::new().expect("Failed to intialise GlobalHotKeyManager.");
 
-    let desktops: [Desktop; 10] = std::array::from_fn(|index| {
-        let code = match index {
+    let mut map: HashMap<u32, Action> = HashMap::new();
+
+    for number_key in 0..10 {
+        let code = match number_key {
             0 => Code::Digit1,
             1 => Code::Digit2,
             2 => Code::Digit3,
@@ -41,30 +40,26 @@ fn main() {
             _ => unreachable!(),
         };
 
-        Desktop {
-            num: u32::try_from(index).unwrap(),
-            travel_hotkey: HotKey::new(Some(Modifiers::ALT), code),
-            move_hotkey: HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), code),
-        }
-    });
+        let travel_hotkey = HotKey::new(Some(Modifiers::ALT), code);
+        map.insert(
+            travel_hotkey.id,
+            Action::Travel(Travel {
+                desktop_num: number_key,
+            }),
+        );
+        manager.register(travel_hotkey).unwrap();
 
-    for desktop in &desktops {
-        manager.register(desktop.travel_hotkey).unwrap();
-        manager.register(desktop.move_hotkey).unwrap();
+        let move_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), code);
+        map.insert(
+            move_hotkey.id,
+            Action::Move(Move {
+                desktop_num: number_key,
+            }),
+        );
+        manager.register(move_hotkey).unwrap();
     }
 
-    manager
-        .register(HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::ALT),
-            Code::ArrowLeft,
-        ))
-        .unwrap();
-    manager
-        .register(HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::ALT),
-            Code::ArrowRight,
-        ))
-        .unwrap();
+    let map = map;
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
@@ -73,13 +68,9 @@ fn main() {
         let _ = proxy.send_event(AppEvent::HotKey(event));
     }));
 
-    let mut app = App {
-        hotkeys_manager: manager,
-        desktops,
-    };
+    let mut app = App { manager, map };
 
     event_loop.run_app(&mut app).unwrap()
-    // ---
 }
 
 #[derive(Debug)]
@@ -89,8 +80,8 @@ enum AppEvent {
 
 struct App {
     #[allow(dead_code)]
-    hotkeys_manager: GlobalHotKeyManager,
-    desktops: [Desktop; 10],
+    manager: GlobalHotKeyManager,
+    map: HashMap<u32, Action>,
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -107,39 +98,72 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => {
-                //println!("{:?}", event);
+                println!("{:?}", event);
                 if event.state != HotKeyState::Pressed {
                     return;
                 }
 
-                for desktop in &self.desktops {
-                    if event.id == desktop.travel_hotkey.id {
-                        desktop.switch_to();
-                    } else if event.id == desktop.move_hotkey.id {
-                        desktop.move_to();
-                    }
+                let action = self.map.get(&event.id).unwrap();
+
+                match action {
+                    Action::Move(x) => x.execute(),
+                    Action::Travel(x) => x.execute(),
                 }
             }
         }
     }
 }
 
-struct Desktop {
-    num: u32,
-    travel_hotkey: HotKey,
-    move_hotkey: HotKey,
+// struct Desktop {
+//     num: u32,
+//     travel_hotkey: HotKey,
+//     move_hotkey: HotKey,
+// }
+
+enum Action {
+    Travel(Travel),
+    Move(Move),
 }
 
-impl Desktop {
-    fn switch_to(&self) {
-        self.create_desktops();
-        switch_desktop(self.num).unwrap_or_else(|err| {
-            panic!("Failed to switch to destkop {}: {:?}", self.num + 1, err)
+trait ActionBehaviour {
+    fn execute(&self);
+
+    /// Creates desktops until the required number of desktops exists.
+    fn create_desktops(&self, desktop_num: u32) {
+        let desktop_count = get_desktop_count().expect("Failed to get desktop count.");
+
+        if desktop_count < desktop_num + 1 {
+            for _ in 0..=(desktop_num - desktop_count) {
+                create_desktop().expect("Failed to create required desktops.");
+            }
+        }
+    }
+}
+
+struct Travel {
+    desktop_num: u32,
+}
+
+impl ActionBehaviour for Travel {
+    fn execute(&self) {
+        self.create_desktops(self.desktop_num);
+        switch_desktop(self.desktop_num).unwrap_or_else(|err| {
+            panic!(
+                "Failed to switch to desktop {}: {:?}",
+                self.desktop_num + 1,
+                err
+            )
         });
     }
+}
 
-    fn move_to(&self) {
-        self.create_desktops();
+struct Move {
+    desktop_num: u32,
+}
+
+impl ActionBehaviour for Move {
+    fn execute(&self) {
+        self.create_desktops(self.desktop_num);
         let hwnd = unsafe { GetForegroundWindow() };
 
         if hwnd.is_invalid() {
@@ -152,20 +176,9 @@ impl Desktop {
             return;
         }
 
-        if let Err(e) = move_window_to_desktop(self.num, &hwnd) {
+        if let Err(e) = move_window_to_desktop(self.desktop_num, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
-        }
-    }
-
-    /// Creates desktops until the required number of desktops exists.
-    fn create_desktops(&self) {
-        let desktop_count = get_desktop_count().expect("Failed to get desktop count.");
-
-        if desktop_count < self.num + 1 {
-            for _ in 0..=(self.num - desktop_count) {
-                create_desktop().expect("Failed to create required desktops.");
-            }
         }
     }
 }
