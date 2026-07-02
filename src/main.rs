@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
@@ -5,6 +6,11 @@ use std::collections::HashMap;
 use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey, Modifiers},
+};
+
+use tray_icon::{
+    TrayIcon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem},
 };
 
 use winit::{
@@ -79,7 +85,14 @@ fn main() {
         let _ = proxy.send_event(AppEvent::HotKey(event));
     }));
 
-    let mut app = App { manager, map };
+    let mut app = App {
+        manager,
+        map,
+        tray_icon: None,
+    };
+
+    let menu_channel = MenuEvent::receiver();
+    let tray_channel = MenuEvent::receiver();
 
     event_loop.run_app(&mut app).unwrap()
 }
@@ -93,6 +106,27 @@ struct App {
     #[allow(dead_code)]
     manager: GlobalHotKeyManager,
     map: HashMap<u32, Action>,
+    tray_icon: Option<TrayIcon>,
+}
+
+impl App {
+    fn new_tray_icon() -> TrayIcon {
+        TrayIconBuilder::new()
+            .with_menu(Box::new(Self::new_tray_menu()))
+            .with_tooltip("better-desktops")
+            .with_title("better-desktops")
+            .build()
+            .unwrap()
+    }
+
+    fn new_tray_menu() -> Menu {
+        let menu = Menu::new();
+        let item1 = MenuItem::new("item1", true, None);
+        if let Err(err) = menu.append(&item1) {
+            println!("{err:?}");
+        }
+        menu
+    }
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -104,6 +138,16 @@ impl ApplicationHandler<AppEvent> for App {
         _window_id: WindowId,
         _event: WindowEvent,
     ) {
+    }
+
+    fn new_events(
+        &mut self,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
+        cause: winit::event::StartCause,
+    ) {
+        if winit::event::StartCause::Init == cause {
+            self.tray_icon = Some(Self::new_tray_icon());
+        }
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
