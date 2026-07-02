@@ -10,7 +10,7 @@ use global_hotkey::{
 
 use tray_icon::{
     TrayIcon, TrayIconBuilder,
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
 use winit::{
@@ -79,10 +79,20 @@ fn main() {
     let map = map;
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
-    let proxy = event_loop.create_proxy();
 
+    let proxy = event_loop.create_proxy();
     GlobalHotKeyEvent::set_event_handler(Some(move |event| {
         let _ = proxy.send_event(AppEvent::HotKey(event));
+    }));
+
+    // let proxy = event_loop.create_proxy();
+    // TrayIconEvent::set_event_handler(Some(move |event| {
+    //     let _ = proxy.send_event(AppEvent::TrayIconEvent(event));
+    // }));
+
+    let proxy = event_loop.create_proxy();
+    MenuEvent::set_event_handler(Some(move |event| {
+        let _ = proxy.send_event(AppEvent::MenuEvent(event));
     }));
 
     let mut app = App {
@@ -91,8 +101,8 @@ fn main() {
         tray_icon: None,
     };
 
-    let menu_channel = MenuEvent::receiver();
-    let tray_channel = MenuEvent::receiver();
+    // let menu_channel = MenuEvent::receiver();
+    // let tray_channel = MenuEvent::receiver();
 
     event_loop.run_app(&mut app).unwrap()
 }
@@ -100,6 +110,8 @@ fn main() {
 #[derive(Debug)]
 enum AppEvent {
     HotKey(GlobalHotKeyEvent),
+    // TrayIconEvent(TrayIconEvent),
+    MenuEvent(MenuEvent),
 }
 
 struct App {
@@ -121,8 +133,8 @@ impl App {
 
     fn new_tray_menu() -> Menu {
         let menu = Menu::new();
-        let item1 = MenuItem::new("item1", true, None);
-        if let Err(err) = menu.append(&item1) {
+        let exit_item = MenuItem::with_id(MenuId::new("exit_btn"), "Exit", true, None);
+        if let Err(err) = menu.append(&exit_item) {
             println!("{err:?}");
         }
         menu
@@ -150,7 +162,7 @@ impl ApplicationHandler<AppEvent> for App {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => {
                 //println!("{:?}", event);
@@ -162,6 +174,20 @@ impl ApplicationHandler<AppEvent> for App {
 
                 action.run();
             }
+            AppEvent::MenuEvent(event) => {
+                //println!("{:?}", event);
+                match event.id.as_ref() {
+                    "exit_btn" => {
+                        println!("Exiting due to tray button press.");
+                        event_loop.exit();
+                    }
+                    _ => {
+                        eprintln!("No logic for this button");
+                    }
+                }
+            } // AppEvent::TrayIconEvent(_) => {
+              //     //println!("{:?}", event);
+              // }
         }
     }
 }
