@@ -1,0 +1,1 @@
+Small program which calls `winvd` via `global-hotkey` instead of using an AutoHotKey script.
