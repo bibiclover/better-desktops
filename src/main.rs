@@ -9,7 +9,7 @@ use global_hotkey::{
 };
 
 use tray_icon::{
-    TrayIcon, TrayIconBuilder,
+    Icon, TrayIcon, TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
@@ -123,9 +123,12 @@ struct App {
 
 impl App {
     fn new_tray_icon() -> TrayIcon {
+        let icon = Self::load_embedded_icon();
+
         TrayIconBuilder::new()
             .with_menu(Box::new(Self::new_tray_menu()))
             .with_tooltip("better-desktops")
+            .with_icon(icon)
             .with_title("better-desktops")
             .build()
             .unwrap()
@@ -138,6 +141,19 @@ impl App {
             println!("{err:?}");
         }
         menu
+    }
+
+    fn load_embedded_icon() -> Icon {
+        let icon_bytes = include_bytes!("../assets/icon.png");
+
+        let image = image::load_from_memory(icon_bytes)
+            .expect("Failed to decode embedded icon")
+            .to_rgba8();
+
+        let (width, height) = image.dimensions();
+        let rgba = image.into_raw();
+
+        Icon::from_rgba(rgba, width, height).expect("Failed to create Icon from RGBA bytes")
     }
 }
 
