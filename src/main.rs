@@ -14,7 +14,9 @@ use winit::{
     window::WindowId,
 };
 
-use winvd::{create_desktop, get_desktop_count, move_window_to_desktop, switch_desktop};
+use winvd::{
+    create_desktop, get_current_desktop, get_desktop_count, move_window_to_desktop, switch_desktop,
+};
 
 use windows::Win32::UI::WindowsAndMessaging::{
     GetDesktopWindow, GetForegroundWindow, GetShellWindow,
@@ -59,6 +61,15 @@ fn main() {
         manager.register(move_hotkey).unwrap();
     }
 
+    let move_right_hotkey =
+        HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowRight);
+    map.insert(move_right_hotkey.id, Action::MoveRight);
+    manager.register(move_right_hotkey).unwrap();
+
+    let move_left_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowLeft);
+    map.insert(move_left_hotkey.id, Action::MoveLeft);
+    manager.register(move_left_hotkey).unwrap();
+
     let map = map;
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
@@ -98,31 +109,35 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => {
-                println!("{:?}", event);
+                //println!("{:?}", event);
                 if event.state != HotKeyState::Pressed {
                     return;
                 }
 
                 let action = self.map.get(&event.id).unwrap();
 
-                match action {
-                    Action::Move(x) => x.execute(),
-                    Action::Travel(x) => x.execute(),
-                }
+                action.run();
             }
         }
     }
 }
 
-// struct Desktop {
-//     num: u32,
-//     travel_hotkey: HotKey,
-//     move_hotkey: HotKey,
-// }
-
 enum Action {
     Travel(Travel),
     Move(Move),
+    MoveRight,
+    MoveLeft,
+}
+
+impl Action {
+    fn run(&self) {
+        match self {
+            Action::Move(x) => x.execute(),
+            Action::Travel(x) => x.execute(),
+            Action::MoveRight => MoveRight.execute(),
+            Action::MoveLeft => MoveLeft.execute(),
+        }
+    }
 }
 
 trait ActionBehaviour {
@@ -177,6 +192,61 @@ impl ActionBehaviour for Move {
         }
 
         if let Err(e) = move_window_to_desktop(self.desktop_num, &hwnd) {
+            eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
+            return;
+        }
+    }
+}
+
+struct MoveRight;
+
+impl ActionBehaviour for MoveRight {
+    fn execute(&self) {
+        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+        self.create_desktops(current_desktop_index + 1);
+        let hwnd = unsafe { GetForegroundWindow() };
+
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't move.");
+            return;
+        }
+
+        if let Err(e) = move_window_to_desktop(current_desktop_index + 1, &hwnd) {
+            eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
+            return;
+        }
+    }
+}
+
+struct MoveLeft;
+
+impl ActionBehaviour for MoveLeft {
+    fn execute(&self) {
+        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+
+        if current_desktop_index == 0 {
+            eprintln!("At leftmost desktop. Can't move more left.");
+            return;
+        }
+
+        let hwnd = unsafe { GetForegroundWindow() };
+
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't move.");
+            return;
+        }
+
+        if let Err(e) = move_window_to_desktop(current_desktop_index - 1, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
         }
