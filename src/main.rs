@@ -21,7 +21,8 @@ use winit::{
 };
 
 use winvd::{
-    create_desktop, get_current_desktop, get_desktop_count, move_window_to_desktop, switch_desktop,
+    create_desktop, get_current_desktop, get_desktop_count, is_window_on_current_desktop,
+    move_window_to_desktop, switch_desktop,
 };
 
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -269,6 +270,13 @@ impl ActionBehaviour for Move {
 
         if hwnd.is_invalid() {
             eprintln!("Foreground window handle is not valid.");
+            return;
+        }
+
+        if !is_window_on_current_desktop(hwnd)
+            .expect("Unable to determine window's current desktop.")
+        {
+            eprintln!("Focused window is on a different desktop");
             return;
         }
 
