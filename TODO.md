@@ -1,0 +1,5 @@
+- [ ] Rebind ctrl + alt + number as doesn't work on all keyboards nicely
+- [ ] Allow for general rebinding
+    - [ ] Through config file?
+    - [ ] Through UI?
+- [ ] Explore pinning windows
