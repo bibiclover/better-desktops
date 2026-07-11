@@ -21,8 +21,9 @@ use winit::{
 };
 
 use winvd::{
-    create_desktop, get_current_desktop, get_desktop_count, is_window_on_current_desktop,
-    move_window_to_desktop, switch_desktop,
+    create_desktop, get_current_desktop, get_desktop_count, is_pinned_window,
+    is_window_on_current_desktop, is_window_on_desktop, move_window_to_desktop, pin_window,
+    switch_desktop, unpin_window,
 };
 
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -76,6 +77,10 @@ fn main() {
     let move_left_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowLeft);
     map.insert(move_left_hotkey.id, Action::MoveLeft);
     manager.register(move_left_hotkey).unwrap();
+
+    let pin_window_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyP);
+    map.insert(pin_window_hotkey.id, Action::PinWindow);
+    manager.register(pin_window_hotkey).unwrap();
 
     let map = map;
 
@@ -214,6 +219,7 @@ enum Action {
     Move(Move),
     MoveRight,
     MoveLeft,
+    PinWindow,
 }
 
 impl Action {
@@ -223,6 +229,7 @@ impl Action {
             Action::Travel(x) => x.execute(),
             Action::MoveRight => MoveRight.execute(),
             Action::MoveLeft => MoveLeft.execute(),
+            Action::PinWindow => PinWindow.execute(),
         }
     }
 }
@@ -343,6 +350,39 @@ impl ActionBehaviour for MoveLeft {
         if let Err(e) = move_window_to_desktop(current_desktop_index - 1, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
+        }
+    }
+}
+
+struct PinWindow;
+
+impl ActionBehaviour for PinWindow {
+    /// Toggles window pinning.
+    fn execute(&self) {
+        let hwnd = unsafe { GetForegroundWindow() };
+
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't move.");
+            return;
+        }
+
+        let is_pinned = is_pinned_window(hwnd).unwrap();
+
+        if is_pinned {
+            if let Err(e) = unpin_window(hwnd) {
+                eprintln!("Failed to unpin window {:?}: {:?}", &hwnd, e);
+                return;
+            }
+        } else {
+            if let Err(e) = pin_window(hwnd) {
+                eprintln!("Failed to pin window {:?}: {:?}", &hwnd, e);
+                return;
+            }
         }
     }
 }
