@@ -253,6 +253,30 @@ trait ActionBehaviour {
             }
         }
     }
+
+    /// Checks if hwnd points towards a window that is/should be moveable.
+    /// If so returns hwnd, else None.
+    fn moveable_hwnd(&self) -> Option<HWND> {
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return None;
+        }
+
+        if !is_window_on_current_desktop(hwnd)
+            .expect("Unable to determine window's current desktop.")
+        {
+            eprintln!("Focused window is on a different desktop");
+            return None;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't do anything.");
+            return None;
+        }
+
+        Some(hwnd)
+    }
 }
 
 struct Travel {
@@ -286,24 +310,10 @@ struct Move {
 impl ActionBehaviour for Move {
     fn execute(&self, _: &mut DesktopHandleList) {
         self.create_desktops(self.desktop_num);
-        let hwnd = unsafe { GetForegroundWindow() };
-
-        if hwnd.is_invalid() {
-            eprintln!("Foreground window handle is not valid.");
-            return;
-        }
-
-        if !is_window_on_current_desktop(hwnd)
-            .expect("Unable to determine window's current desktop.")
-        {
-            eprintln!("Focused window is on a different desktop");
-            return;
-        }
-
-        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
-            return;
-        }
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
 
         if let Err(e) = move_window_to_desktop(self.desktop_num, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
@@ -318,24 +328,10 @@ impl ActionBehaviour for MoveRight {
     fn execute(&self, _: &mut DesktopHandleList) {
         let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
         self.create_desktops(current_desktop_index + 1);
-        let hwnd = unsafe { GetForegroundWindow() };
-
-        if hwnd.is_invalid() {
-            eprintln!("Foreground window handle is not valid.");
-            return;
-        }
-
-        if !is_window_on_current_desktop(hwnd)
-            .expect("Unable to determine window's current desktop.")
-        {
-            eprintln!("Focused window is on a different desktop");
-            return;
-        }
-
-        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
-            return;
-        }
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
 
         if let Err(e) = move_window_to_desktop(current_desktop_index + 1, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
@@ -355,24 +351,10 @@ impl ActionBehaviour for MoveLeft {
             return;
         }
 
-        let hwnd = unsafe { GetForegroundWindow() };
-
-        if hwnd.is_invalid() {
-            eprintln!("Foreground window handle is not valid.");
-            return;
-        }
-
-        if !is_window_on_current_desktop(hwnd)
-            .expect("Unable to determine window's current desktop.")
-        {
-            eprintln!("Focused window is on a different desktop");
-            return;
-        }
-
-        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
-            return;
-        }
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
 
         if let Err(e) = move_window_to_desktop(current_desktop_index - 1, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
