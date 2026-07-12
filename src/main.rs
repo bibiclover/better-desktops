@@ -21,9 +21,8 @@ use winit::{
 };
 
 use winvd::{
-    Desktop, create_desktop, get_current_desktop, get_desktop_by_window, get_desktop_count,
-    is_pinned_window, is_window_on_current_desktop, is_window_on_desktop, move_window_to_desktop,
-    pin_window, switch_desktop, unpin_window,
+    create_desktop, get_current_desktop, get_desktop_count, is_pinned_window,
+    is_window_on_current_desktop, move_window_to_desktop, pin_window, switch_desktop, unpin_window,
 };
 
 use windows::Win32::{
@@ -34,7 +33,7 @@ use windows::Win32::{
 };
 
 fn main() {
-    let manager = GlobalHotKeyManager::new().expect("Failed to intialise GlobalHotKeyManager.");
+    let manager = GlobalHotKeyManager::new().expect("Failed to initialise GlobalHotKeyManager.");
 
     let mut map: HashMap<u32, Action> = HashMap::new();
 
@@ -270,7 +269,7 @@ impl ActionBehaviour for Travel {
             Ok(_) => {}
             Err(err) => {
                 eprintln!(
-                    "Failed to swtich destkop {}: {:?}",
+                    "Failed to switch desktop {}: {:?}",
                     self.desktop_num + 1,
                     err
                 )
@@ -326,6 +325,13 @@ impl ActionBehaviour for MoveRight {
             return;
         }
 
+        if !is_window_on_current_desktop(hwnd)
+            .expect("Unable to determine window's current desktop.")
+        {
+            eprintln!("Focused window is on a different desktop");
+            return;
+        }
+
         if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
             eprintln!("Desktop is in focus. Can't move.");
             return;
@@ -356,6 +362,13 @@ impl ActionBehaviour for MoveLeft {
             return;
         }
 
+        if !is_window_on_current_desktop(hwnd)
+            .expect("Unable to determine window's current desktop.")
+        {
+            eprintln!("Focused window is on a different desktop");
+            return;
+        }
+
         if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
             eprintln!("Desktop is in focus. Can't move.");
             return;
@@ -381,7 +394,7 @@ impl ActionBehaviour for PinWindow {
         }
 
         if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
+            eprintln!("Desktop is in focus. Can't pin.");
             return;
         }
 
