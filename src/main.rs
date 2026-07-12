@@ -21,13 +21,16 @@ use winit::{
 };
 
 use winvd::{
-    create_desktop, get_current_desktop, get_desktop_count, is_pinned_window,
-    is_window_on_current_desktop, is_window_on_desktop, move_window_to_desktop, pin_window,
-    switch_desktop, unpin_window,
+    Desktop, create_desktop, get_current_desktop, get_desktop_by_window, get_desktop_count,
+    is_pinned_window, is_window_on_current_desktop, is_window_on_desktop, move_window_to_desktop,
+    pin_window, switch_desktop, unpin_window,
 };
 
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetDesktopWindow, GetForegroundWindow, GetShellWindow,
+use windows::Win32::{
+    Foundation::HWND,
+    UI::WindowsAndMessaging::{
+        GetDesktopWindow, GetForegroundWindow, GetShellWindow, SetForegroundWindow,
+    },
 };
 
 fn main() {
@@ -101,8 +104,11 @@ fn main() {
         let _ = proxy.send_event(AppEvent::MenuEvent(event));
     }));
 
+    let desktop_handle_list = DesktopHandleList::new();
+
     let mut app = App {
         manager,
+        desktop_handle_list,
         map,
         tray_icon: None,
     };
@@ -123,6 +129,7 @@ enum AppEvent {
 struct App {
     #[allow(dead_code)]
     manager: GlobalHotKeyManager,
+    desktop_handle_list: DesktopHandleList,
     map: HashMap<u32, Action>,
     tray_icon: Option<TrayIcon>,
 }
@@ -256,13 +263,17 @@ struct Travel {
 impl ActionBehaviour for Travel {
     fn execute(&self) {
         self.create_desktops(self.desktop_num);
-        switch_desktop(self.desktop_num).unwrap_or_else(|err| {
-            panic!(
-                "Failed to switch to desktop {}: {:?}",
-                self.desktop_num + 1,
-                err
-            )
-        });
+
+        match switch_desktop(self.desktop_num) {
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!(
+                    "Failed to swtich destkop {}: {:?}",
+                    self.desktop_num + 1,
+                    err
+                )
+            }
+        }
     }
 }
 
@@ -383,6 +394,89 @@ impl ActionBehaviour for PinWindow {
                 eprintln!("Failed to pin window {:?}: {:?}", &hwnd, e);
                 return;
             }
+        }
+    }
+}
+
+struct DesktopHandleList {
+    handles: HashMap<u32, HWND>,
+}
+
+impl DesktopHandleList {
+    fn new() -> Self {
+        Self {
+            handles: HashMap::new(),
+        }
+    }
+
+    // Do I call get_current_desktop in here or just take the value from whatever calls this function.
+    // Former is more portable, but latter may be more optimal depending
+    // on the implementation of getting the current desktop.
+
+    /// Stores the currently in focus window to the desktop it is in.
+    fn store(&mut self) {
+        let current_desktop = match get_current_desktop() {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to get current desktop: {:?}", err);
+                return;
+            }
+        };
+
+        let current_foreground_window = unsafe { GetForegroundWindow() };
+
+        let is_window_on_current =
+            match is_window_on_current_desktop(current_foreground_window.clone()) {
+                Ok(val) => val,
+                Err(e) => {
+                    eprintln!(
+                        "Failed to determine if window {:?} is on current desktop: {:?}",
+                        current_foreground_window, e
+                    );
+                    return;
+                }
+            };
+
+        if !is_window_on_current {
+            return;
+        }
+
+        self.handles.insert(
+            current_desktop.get_index().unwrap(),
+            current_foreground_window,
+        );
+    }
+
+    fn focus(&self) {
+        let current_desktop = match get_current_desktop() {
+            Ok(val) => val.get_index().unwrap(),
+            Err(err) => {
+                eprintln!("Failed to get current desktop: {:?}", err);
+                return;
+            }
+        };
+
+        let hwnd = match self.handles.get(&current_desktop) {
+            Some(hwnd) => hwnd.clone(),
+            None => return,
+        };
+
+        let is_window_on_current = match is_window_on_current_desktop(hwnd) {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!(
+                    "Failed to determine if window {:?} is on current desktop: {:?}",
+                    hwnd, e
+                );
+                return;
+            }
+        };
+
+        if is_window_on_current {
+            unsafe {
+                let _ = SetForegroundWindow(hwnd.clone());
+            }
+            return;
         }
     }
 }
