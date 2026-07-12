@@ -201,7 +201,7 @@ impl ApplicationHandler<AppEvent> for App {
 
                 let action = self.map.get(&event.id).unwrap();
 
-                action.run();
+                action.run(&mut self.desktop_handle_list);
             }
             AppEvent::MenuEvent(event) => {
                 //println!("{:?}", event);
@@ -230,19 +230,19 @@ enum Action {
 }
 
 impl Action {
-    fn run(&self) {
+    fn run(&self, desktop_handle_list: &mut DesktopHandleList) {
         match self {
-            Action::Move(x) => x.execute(),
-            Action::Travel(x) => x.execute(),
-            Action::MoveRight => MoveRight.execute(),
-            Action::MoveLeft => MoveLeft.execute(),
-            Action::PinWindow => PinWindow.execute(),
+            Action::Move(x) => x.execute(desktop_handle_list),
+            Action::Travel(x) => x.execute(desktop_handle_list),
+            Action::MoveRight => MoveRight.execute(desktop_handle_list),
+            Action::MoveLeft => MoveLeft.execute(desktop_handle_list),
+            Action::PinWindow => PinWindow.execute(desktop_handle_list),
         }
     }
 }
 
 trait ActionBehaviour {
-    fn execute(&self);
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList);
 
     /// Creates desktops until the required number of desktops exists.
     fn create_desktops(&self, desktop_num: u32) {
@@ -261,7 +261,9 @@ struct Travel {
 }
 
 impl ActionBehaviour for Travel {
-    fn execute(&self) {
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
+        desktop_handle_list.store();
+
         self.create_desktops(self.desktop_num);
 
         match switch_desktop(self.desktop_num) {
@@ -274,6 +276,7 @@ impl ActionBehaviour for Travel {
                 )
             }
         }
+        desktop_handle_list.focus();
     }
 }
 
@@ -282,7 +285,7 @@ struct Move {
 }
 
 impl ActionBehaviour for Move {
-    fn execute(&self) {
+    fn execute(&self, _: &mut DesktopHandleList) {
         self.create_desktops(self.desktop_num);
         let hwnd = unsafe { GetForegroundWindow() };
 
@@ -313,7 +316,7 @@ impl ActionBehaviour for Move {
 struct MoveRight;
 
 impl ActionBehaviour for MoveRight {
-    fn execute(&self) {
+    fn execute(&self, _: &mut DesktopHandleList) {
         let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
         self.create_desktops(current_desktop_index + 1);
         let hwnd = unsafe { GetForegroundWindow() };
@@ -338,7 +341,7 @@ impl ActionBehaviour for MoveRight {
 struct MoveLeft;
 
 impl ActionBehaviour for MoveLeft {
-    fn execute(&self) {
+    fn execute(&self, _: &mut DesktopHandleList) {
         let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
 
         if current_desktop_index == 0 {
@@ -369,7 +372,7 @@ struct PinWindow;
 
 impl ActionBehaviour for PinWindow {
     /// Toggles window pinning.
-    fn execute(&self) {
+    fn execute(&self, _: &mut DesktopHandleList) {
         let hwnd = unsafe { GetForegroundWindow() };
 
         if hwnd.is_invalid() {
