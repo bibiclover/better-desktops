@@ -198,7 +198,9 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 }
 
-                let action = self.map.get(&event.id).unwrap();
+                let Some(action) = self.map.get(&event.id) else {
+                    return;
+                };
 
                 action.run(&mut self.desktop_handle_list);
             }
@@ -326,8 +328,10 @@ struct MoveRight;
 
 impl ActionBehaviour for MoveRight {
     fn execute(&self, _: &mut DesktopHandleList) {
-        let Some(current_desktop_index) = get_current_desktop_index() else { return };
-        
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
         self.create_desktops(current_desktop_index + 1);
         let hwnd = match self.moveable_hwnd() {
             Some(hwnd) => hwnd,
@@ -345,7 +349,9 @@ struct MoveLeft;
 
 impl ActionBehaviour for MoveLeft {
     fn execute(&self, _: &mut DesktopHandleList) {
-        let Some(current_desktop_index) = get_current_desktop_index() else { return };
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
 
         if current_desktop_index == 0 {
             eprintln!("At leftmost desktop. Can't move more left.");
@@ -381,7 +387,14 @@ impl ActionBehaviour for PinWindow {
             return;
         }
 
-        let is_pinned = is_pinned_window(hwnd).unwrap();
+        let Ok(is_pinned) = is_pinned_window(hwnd).inspect_err(|e| {
+            eprintln!(
+                "Failed to determine if window {:?} is pinned: {:?}",
+                hwnd, e
+            )
+        }) else {
+            return;
+        };
 
         if is_pinned {
             if let Err(e) = unpin_window(hwnd) {
@@ -410,8 +423,10 @@ impl DesktopHandleList {
 
     /// Stores the currently in focus window to the desktop it is in.
     fn store(&mut self) {
-        let Some(current_desktop_index) = get_current_desktop_index() else { return };
-        
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
         let current_foreground_window = unsafe { GetForegroundWindow() };
 
         let is_window_on_current =
@@ -430,14 +445,14 @@ impl DesktopHandleList {
             return;
         }
 
-        self.handles.insert(
-            current_desktop_index,
-            current_foreground_window,
-        );
+        self.handles
+            .insert(current_desktop_index, current_foreground_window);
     }
 
     fn focus(&self) {
-        let Some(current_desktop_index) = get_current_desktop_index() else { return };
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
 
         let hwnd = match self.handles.get(&current_desktop_index) {
             Some(hwnd) => hwnd.clone(),
@@ -471,11 +486,11 @@ fn get_current_desktop_index() -> Option<u32> {
             Err(err) => {
                 eprintln!("Failed to get current desktop index: {:?}", err);
                 None
-            },
+            }
         },
         Err(_) => {
             eprintln!("Failed to get current desktop: {:?}", err);
             None
-        },
+        }
     }
 }
