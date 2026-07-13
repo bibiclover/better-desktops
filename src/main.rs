@@ -326,7 +326,8 @@ struct MoveRight;
 
 impl ActionBehaviour for MoveRight {
     fn execute(&self, _: &mut DesktopHandleList) {
-        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+        let Some(current_desktop_index) = get_current_desktop_index() else { return };
+        
         self.create_desktops(current_desktop_index + 1);
         let hwnd = match self.moveable_hwnd() {
             Some(hwnd) => hwnd,
@@ -344,7 +345,7 @@ struct MoveLeft;
 
 impl ActionBehaviour for MoveLeft {
     fn execute(&self, _: &mut DesktopHandleList) {
-        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+        let Some(current_desktop_index) = get_current_desktop_index() else { return };
 
         if current_desktop_index == 0 {
             eprintln!("At leftmost desktop. Can't move more left.");
@@ -407,20 +408,10 @@ impl DesktopHandleList {
         }
     }
 
-    // Do I call get_current_desktop in here or just take the value from whatever calls this function.
-    // Former is more portable, but latter may be more optimal depending
-    // on the implementation of getting the current desktop.
-
     /// Stores the currently in focus window to the desktop it is in.
     fn store(&mut self) {
-        let current_desktop = match get_current_desktop() {
-            Ok(val) => val,
-            Err(err) => {
-                eprintln!("Failed to get current desktop: {:?}", err);
-                return;
-            }
-        };
-
+        let Some(current_desktop_index) = get_current_desktop_index() else { return };
+        
         let current_foreground_window = unsafe { GetForegroundWindow() };
 
         let is_window_on_current =
@@ -440,21 +431,15 @@ impl DesktopHandleList {
         }
 
         self.handles.insert(
-            current_desktop.get_index().unwrap(),
+            current_desktop_index,
             current_foreground_window,
         );
     }
 
     fn focus(&self) {
-        let current_desktop = match get_current_desktop() {
-            Ok(val) => val.get_index().unwrap(),
-            Err(err) => {
-                eprintln!("Failed to get current desktop: {:?}", err);
-                return;
-            }
-        };
+        let Some(current_desktop_index) = get_current_desktop_index() else { return };
 
-        let hwnd = match self.handles.get(&current_desktop) {
+        let hwnd = match self.handles.get(&current_desktop_index) {
             Some(hwnd) => hwnd.clone(),
             None => return,
         };
@@ -476,5 +461,21 @@ impl DesktopHandleList {
             }
             return;
         }
+    }
+}
+
+fn get_current_desktop_index() -> Option<u32> {
+    match get_current_desktop() {
+        Ok(desktop) => match desktop.get_index() {
+            Ok(index) => Some(index),
+            Err(err) => {
+                eprintln!("Failed to get current desktop index: {:?}", err);
+                None
+            },
+        },
+        Err(_) => {
+            eprintln!("Failed to get current desktop: {:?}", err);
+            None
+        },
     }
 }
