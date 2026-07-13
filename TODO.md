@@ -2,4 +2,6 @@
 - [ ] Allow for general rebinding
     - [ ] Through config file?
     - [ ] Through UI?
-- [ ] Explore pinning windows
+- [x] Pinning windows
+- [x] Refocus on desktop switch
+- [ ] Investigate possible race conditions after switching desktop
