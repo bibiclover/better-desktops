@@ -488,7 +488,7 @@ fn get_current_desktop_index() -> Option<u32> {
                 None
             }
         },
-        Err(_) => {
+        Err(err) => {
             eprintln!("Failed to get current desktop: {:?}", err);
             None
         }
