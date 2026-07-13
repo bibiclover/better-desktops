@@ -429,17 +429,16 @@ impl DesktopHandleList {
 
         let current_foreground_window = unsafe { GetForegroundWindow() };
 
-        let is_window_on_current =
-            match is_window_on_current_desktop(current_foreground_window.clone()) {
-                Ok(val) => val,
-                Err(e) => {
-                    eprintln!(
-                        "Failed to determine if window {:?} is on current desktop: {:?}",
-                        current_foreground_window, e
-                    );
-                    return;
-                }
-            };
+        let is_window_on_current = match is_window_on_current_desktop(current_foreground_window) {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!(
+                    "Failed to determine if window {:?} is on current desktop: {:?}",
+                    current_foreground_window, e
+                );
+                return;
+            }
+        };
 
         if !is_window_on_current {
             return;
@@ -455,7 +454,7 @@ impl DesktopHandleList {
         };
 
         let hwnd = match self.handles.get(&current_desktop_index) {
-            Some(hwnd) => hwnd.clone(),
+            Some(hwnd) => *hwnd,
             None => return,
         };
 
@@ -472,7 +471,7 @@ impl DesktopHandleList {
 
         if is_window_on_current {
             unsafe {
-                let _ = SetForegroundWindow(hwnd.clone());
+                let _ = SetForegroundWindow(hwnd);
             }
             return;
         }
