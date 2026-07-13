@@ -21,16 +21,19 @@ use winit::{
 };
 
 use winvd::{
-    create_desktop, get_current_desktop, get_desktop_count, is_window_on_current_desktop,
-    move_window_to_desktop, switch_desktop,
+    create_desktop, get_current_desktop, get_desktop_count, is_pinned_window,
+    is_window_on_current_desktop, move_window_to_desktop, pin_window, switch_desktop, unpin_window,
 };
 
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetDesktopWindow, GetForegroundWindow, GetShellWindow,
+use windows::Win32::{
+    Foundation::HWND,
+    UI::WindowsAndMessaging::{
+        GetDesktopWindow, GetForegroundWindow, GetShellWindow, SetForegroundWindow,
+    },
 };
 
 fn main() {
-    let manager = GlobalHotKeyManager::new().expect("Failed to intialise GlobalHotKeyManager.");
+    let manager = GlobalHotKeyManager::new().expect("Failed to initialise GlobalHotKeyManager.");
 
     let mut map: HashMap<u32, Action> = HashMap::new();
 
@@ -77,6 +80,10 @@ fn main() {
     map.insert(move_left_hotkey.id, Action::MoveLeft);
     manager.register(move_left_hotkey).unwrap();
 
+    let pin_window_hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyP);
+    map.insert(pin_window_hotkey.id, Action::PinWindow);
+    manager.register(pin_window_hotkey).unwrap();
+
     let map = map;
 
     let event_loop = EventLoop::<AppEvent>::with_user_event().build().unwrap();
@@ -96,8 +103,11 @@ fn main() {
         let _ = proxy.send_event(AppEvent::MenuEvent(event));
     }));
 
+    let desktop_handle_list = DesktopHandleList::new();
+
     let mut app = App {
         manager,
+        desktop_handle_list,
         map,
         tray_icon: None,
     };
@@ -118,6 +128,7 @@ enum AppEvent {
 struct App {
     #[allow(dead_code)]
     manager: GlobalHotKeyManager,
+    desktop_handle_list: DesktopHandleList,
     map: HashMap<u32, Action>,
     tray_icon: Option<TrayIcon>,
 }
@@ -187,9 +198,11 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 }
 
-                let action = self.map.get(&event.id).unwrap();
+                let Some(action) = self.map.get(&event.id) else {
+                    return;
+                };
 
-                action.run();
+                action.run(&mut self.desktop_handle_list);
             }
             AppEvent::MenuEvent(event) => {
                 //println!("{:?}", event);
@@ -214,21 +227,23 @@ enum Action {
     Move(Move),
     MoveRight,
     MoveLeft,
+    PinWindow,
 }
 
 impl Action {
-    fn run(&self) {
+    fn run(&self, desktop_handle_list: &mut DesktopHandleList) {
         match self {
-            Action::Move(x) => x.execute(),
-            Action::Travel(x) => x.execute(),
-            Action::MoveRight => MoveRight.execute(),
-            Action::MoveLeft => MoveLeft.execute(),
+            Action::Move(x) => x.execute(desktop_handle_list),
+            Action::Travel(x) => x.execute(desktop_handle_list),
+            Action::MoveRight => MoveRight.execute(desktop_handle_list),
+            Action::MoveLeft => MoveLeft.execute(desktop_handle_list),
+            Action::PinWindow => PinWindow.execute(desktop_handle_list),
         }
     }
 }
 
 trait ActionBehaviour {
-    fn execute(&self);
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList);
 
     /// Creates desktops until the required number of desktops exists.
     fn create_desktops(&self, desktop_num: u32) {
@@ -240,6 +255,30 @@ trait ActionBehaviour {
             }
         }
     }
+
+    /// Checks if hwnd points towards a window that is/should be moveable.
+    /// If so returns hwnd, else None.
+    fn moveable_hwnd(&self) -> Option<HWND> {
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.is_invalid() {
+            eprintln!("Foreground window handle is not valid.");
+            return None;
+        }
+
+        if !is_window_on_current_desktop(hwnd)
+            .expect("Unable to determine window's current desktop.")
+        {
+            eprintln!("Focused window is on a different desktop");
+            return None;
+        }
+
+        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
+            eprintln!("Desktop is in focus. Can't do anything.");
+            return None;
+        }
+
+        Some(hwnd)
+    }
 }
 
 struct Travel {
@@ -247,15 +286,22 @@ struct Travel {
 }
 
 impl ActionBehaviour for Travel {
-    fn execute(&self) {
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
+        desktop_handle_list.store();
+
         self.create_desktops(self.desktop_num);
-        switch_desktop(self.desktop_num).unwrap_or_else(|err| {
-            panic!(
-                "Failed to switch to desktop {}: {:?}",
-                self.desktop_num + 1,
-                err
-            )
-        });
+
+        match switch_desktop(self.desktop_num) {
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!(
+                    "Failed to switch desktop {}: {:?}",
+                    self.desktop_num + 1,
+                    err
+                )
+            }
+        }
+        desktop_handle_list.focus();
     }
 }
 
@@ -264,26 +310,12 @@ struct Move {
 }
 
 impl ActionBehaviour for Move {
-    fn execute(&self) {
+    fn execute(&self, _: &mut DesktopHandleList) {
         self.create_desktops(self.desktop_num);
-        let hwnd = unsafe { GetForegroundWindow() };
-
-        if hwnd.is_invalid() {
-            eprintln!("Foreground window handle is not valid.");
-            return;
-        }
-
-        if !is_window_on_current_desktop(hwnd)
-            .expect("Unable to determine window's current desktop.")
-        {
-            eprintln!("Focused window is on a different desktop");
-            return;
-        }
-
-        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
-            return;
-        }
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
 
         if let Err(e) = move_window_to_desktop(self.desktop_num, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
@@ -295,20 +327,16 @@ impl ActionBehaviour for Move {
 struct MoveRight;
 
 impl ActionBehaviour for MoveRight {
-    fn execute(&self) {
-        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+    fn execute(&self, _: &mut DesktopHandleList) {
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
         self.create_desktops(current_desktop_index + 1);
-        let hwnd = unsafe { GetForegroundWindow() };
-
-        if hwnd.is_invalid() {
-            eprintln!("Foreground window handle is not valid.");
-            return;
-        }
-
-        if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
-            return;
-        }
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
 
         if let Err(e) = move_window_to_desktop(current_desktop_index + 1, &hwnd) {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
@@ -320,14 +348,33 @@ impl ActionBehaviour for MoveRight {
 struct MoveLeft;
 
 impl ActionBehaviour for MoveLeft {
-    fn execute(&self) {
-        let current_desktop_index = get_current_desktop().unwrap().get_index().unwrap();
+    fn execute(&self, _: &mut DesktopHandleList) {
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
 
         if current_desktop_index == 0 {
             eprintln!("At leftmost desktop. Can't move more left.");
             return;
         }
 
+        let hwnd = match self.moveable_hwnd() {
+            Some(hwnd) => hwnd,
+            None => return,
+        };
+
+        if let Err(e) = move_window_to_desktop(current_desktop_index - 1, &hwnd) {
+            eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
+            return;
+        }
+    }
+}
+
+struct PinWindow;
+
+impl ActionBehaviour for PinWindow {
+    /// Toggles window pinning.
+    fn execute(&self, _: &mut DesktopHandleList) {
         let hwnd = unsafe { GetForegroundWindow() };
 
         if hwnd.is_invalid() {
@@ -336,13 +383,113 @@ impl ActionBehaviour for MoveLeft {
         }
 
         if hwnd == unsafe { GetDesktopWindow() } || hwnd == unsafe { GetShellWindow() } {
-            eprintln!("Desktop is in focus. Can't move.");
+            eprintln!("Desktop is in focus. Can't pin.");
             return;
         }
 
-        if let Err(e) = move_window_to_desktop(current_desktop_index - 1, &hwnd) {
-            eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
+        let Ok(is_pinned) = is_pinned_window(hwnd).inspect_err(|e| {
+            eprintln!(
+                "Failed to determine if window {:?} is pinned: {:?}",
+                hwnd, e
+            )
+        }) else {
             return;
+        };
+
+        if is_pinned {
+            if let Err(e) = unpin_window(hwnd) {
+                eprintln!("Failed to unpin window {:?}: {:?}", &hwnd, e);
+                return;
+            }
+        } else {
+            if let Err(e) = pin_window(hwnd) {
+                eprintln!("Failed to pin window {:?}: {:?}", &hwnd, e);
+                return;
+            }
+        }
+    }
+}
+
+struct DesktopHandleList {
+    handles: HashMap<u32, HWND>,
+}
+
+impl DesktopHandleList {
+    fn new() -> Self {
+        Self {
+            handles: HashMap::new(),
+        }
+    }
+
+    /// Stores the currently in focus window to the desktop it is in.
+    fn store(&mut self) {
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
+        let current_foreground_window = unsafe { GetForegroundWindow() };
+
+        let is_window_on_current = match is_window_on_current_desktop(current_foreground_window) {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!(
+                    "Failed to determine if window {:?} is on current desktop: {:?}",
+                    current_foreground_window, e
+                );
+                return;
+            }
+        };
+
+        if !is_window_on_current {
+            return;
+        }
+
+        self.handles
+            .insert(current_desktop_index, current_foreground_window);
+    }
+
+    fn focus(&self) {
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
+        let hwnd = match self.handles.get(&current_desktop_index) {
+            Some(hwnd) => *hwnd,
+            None => return,
+        };
+
+        let is_window_on_current = match is_window_on_current_desktop(hwnd) {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!(
+                    "Failed to determine if window {:?} is on current desktop: {:?}",
+                    hwnd, e
+                );
+                return;
+            }
+        };
+
+        if is_window_on_current {
+            unsafe {
+                let _ = SetForegroundWindow(hwnd);
+            }
+            return;
+        }
+    }
+}
+
+fn get_current_desktop_index() -> Option<u32> {
+    match get_current_desktop() {
+        Ok(desktop) => match desktop.get_index() {
+            Ok(index) => Some(index),
+            Err(err) => {
+                eprintln!("Failed to get current desktop index: {:?}", err);
+                None
+            }
+        },
+        Err(err) => {
+            eprintln!("Failed to get current desktop: {:?}", err);
+            None
         }
     }
 }

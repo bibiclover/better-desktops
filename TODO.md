@@ -1,0 +1,7 @@
+- [ ] Rebind ctrl + alt + number as doesn't work on all keyboards nicely
+- [ ] Allow for general rebinding
+    - [ ] Through config file?
+    - [ ] Through UI?
+- [x] Pinning windows
+- [x] Refocus on desktop switch
+- [ ] Investigate possible race conditions after switching desktop
