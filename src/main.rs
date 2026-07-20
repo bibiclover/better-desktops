@@ -247,11 +247,23 @@ trait ActionBehaviour {
 
     /// Creates desktops until the required number of desktops exists.
     fn create_desktops(&self, desktop_num: u32) {
-        let desktop_count = get_desktop_count().expect("Failed to get desktop count.");
+        let desktop_count = match get_desktop_count() {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to get desktop count: {:?}", err);
+                return;
+            }
+        };
 
         if desktop_count < desktop_num + 1 {
             for _ in 0..=(desktop_num - desktop_count) {
-                create_desktop().expect("Failed to create required desktops.");
+                match create_desktop() {
+                    Ok(_) => {}
+                    Err(err) => {
+                        eprintln!("Failed to create required desktops: {:?}", err);
+                        return;
+                    }
+                };
             }
         }
     }
@@ -265,9 +277,12 @@ trait ActionBehaviour {
             return None;
         }
 
-        if !is_window_on_current_desktop(hwnd)
-            .expect("Unable to determine window's current desktop.")
-        {
+        let Ok(window_on_current) = is_window_on_current_desktop(hwnd) else {
+            eprintln!("Unable to determine window's current desktop.");
+            return None;
+        };
+
+        if !window_on_current {
             eprintln!("Focused window is on a different desktop");
             return None;
         }
@@ -287,7 +302,7 @@ struct Travel {
 
 impl ActionBehaviour for Travel {
     fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
-        desktop_handle_list.store();
+        desktop_handle_list.store(None, None);
 
         self.create_desktops(self.desktop_num);
 
@@ -310,8 +325,9 @@ struct Move {
 }
 
 impl ActionBehaviour for Move {
-    fn execute(&self, _: &mut DesktopHandleList) {
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
         self.create_desktops(self.desktop_num);
+
         let hwnd = match self.moveable_hwnd() {
             Some(hwnd) => hwnd,
             None => return,
@@ -321,13 +337,16 @@ impl ActionBehaviour for Move {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
         }
+
+        desktop_handle_list.clear_current();
+        desktop_handle_list.store(Some(self.desktop_num), Some(hwnd));
     }
 }
 
 struct MoveRight;
 
 impl ActionBehaviour for MoveRight {
-    fn execute(&self, _: &mut DesktopHandleList) {
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
         let Some(current_desktop_index) = get_current_desktop_index() else {
             return;
         };
@@ -342,13 +361,16 @@ impl ActionBehaviour for MoveRight {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
         }
+
+        desktop_handle_list.clear_current();
+        desktop_handle_list.store(Some(current_desktop_index + 1), Some(hwnd));
     }
 }
 
 struct MoveLeft;
 
 impl ActionBehaviour for MoveLeft {
-    fn execute(&self, _: &mut DesktopHandleList) {
+    fn execute(&self, desktop_handle_list: &mut DesktopHandleList) {
         let Some(current_desktop_index) = get_current_desktop_index() else {
             return;
         };
@@ -367,6 +389,9 @@ impl ActionBehaviour for MoveLeft {
             eprintln!("Failed to move window {:?}: {:?}", &hwnd, e);
             return;
         }
+
+        desktop_handle_list.clear_current();
+        desktop_handle_list.store(Some(current_desktop_index - 1), Some(hwnd));
     }
 }
 
@@ -422,26 +447,39 @@ impl DesktopHandleList {
     }
 
     /// Stores the currently in focus window to the desktop it is in.
-    fn store(&mut self) {
-        let Some(current_desktop_index) = get_current_desktop_index() else {
-            return;
+    fn store(&mut self, desktop_index: Option<u32>, hwnd: Option<HWND>) {
+        let current_desktop_index = match desktop_index {
+            Some(index) => index,
+            None => match get_current_desktop_index() {
+                Some(index) => index,
+                None => return,
+            },
         };
 
-        let current_foreground_window = unsafe { GetForegroundWindow() };
+        let current_foreground_window = match hwnd {
+            Some(hwnd) => hwnd,
+            None => unsafe { GetForegroundWindow() },
+        };
 
-        let is_window_on_current = match is_window_on_current_desktop(current_foreground_window) {
-            Ok(val) => val,
-            Err(e) => {
-                eprintln!(
-                    "Failed to determine if window {:?} is on current desktop: {:?}",
-                    current_foreground_window, e
-                );
-                return;
+        match desktop_index {
+            Some(_) => (),
+            None => {
+                let is_window_on_current =
+                    match is_window_on_current_desktop(current_foreground_window) {
+                        Ok(val) => val,
+                        Err(e) => {
+                            eprintln!(
+                                "Failed to determine if window {:?} is on current desktop: {:?}",
+                                current_foreground_window, e
+                            );
+                            return;
+                        }
+                    };
+
+                if !is_window_on_current {
+                    return;
+                }
             }
-        };
-
-        if !is_window_on_current {
-            return;
         }
 
         self.handles
@@ -475,6 +513,14 @@ impl DesktopHandleList {
             }
             return;
         }
+    }
+
+    fn clear_current(&mut self) {
+        let Some(current_desktop_index) = get_current_desktop_index() else {
+            return;
+        };
+
+        self.handles.remove(&current_desktop_index);
     }
 }
 
